@@ -1,0 +1,14 @@
+[Unit]
+Description=nomad — Drift detector (watch + Telegram alerts)
+After=network.target docker.service nomad-dashboard.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 -u __NOMAD_DIR__/cli.py watch --interval 30
+Restart=on-failure
+RestartSec=15
+WorkingDirectory=__NOMAD_DIR__
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

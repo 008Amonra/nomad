@@ -1,0 +1,13 @@
+[Unit]
+Description=nomad — Dashboard (web UI)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/python3 __NOMAD_DIR__/dashboard.py --port 5010
+Restart=on-failure
+RestartSec=10
+WorkingDirectory=__NOMAD_DIR__
+
+[Install]
+WantedBy=default.target
