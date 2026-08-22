@@ -8,15 +8,84 @@ import argparse
 import json
 import sys
 import time
+import os
 from datetime import datetime, timezone
 
 from nomad import NomadEngine, Scanner, Fingerprinter, Tracker
 
+# ─── ANSI Colors ────────────────────────────────────────────
+C_RESET  = "\033[0m"
+C_BOLD   = "\033[1m"
+C_DIM    = "\033[2m"
+C_BLINK  = "\033[5m"
+C_GREEN  = "\033[38;5;46m"
+C_TEAL   = "\033[38;5;51m"
+C_CYAN   = "\033[38;5;87m"
+C_LGRAY  = "\033[38;5;250m"
+C_DGRAY  = "\033[38;5;240m"
+C_RED    = "\033[38;5;196m"
+C_ORANGE = "\033[38;5;208m"
+C_YELLOW = "\033[38;5;226m"
+C_AMBER  = "\033[38;5;214m"
+C_SCORE_OK  = "\033[38;5;46m"
+C_SCORE_MED = "\033[38;5;226m"
+C_SCORE_HI  = "\033[38;5;208m"
+C_SCORE_CR  = "\033[38;5;196m"
+
+def _has_color():
+    return hasattr(sys.stdout, "isatty") and sys.stdout.isatty() and os.environ.get("TERM", "") != "dumb"
+
+NO_COLOR = not _has_color()
+
+def c(code, text):
+    if NO_COLOR:
+        return str(text)
+    return f"{code}{text}{C_RESET}"
+
+def radar_line(i, total=12):
+    """Single line of a radar sweep."""
+    dots = ""
+    for j in range(total):
+        dist = abs(j - total // 2)
+        if dist == 0:
+            dots += "█"
+        elif dist <= 1:
+            dots += "▓"
+        elif dist <= 2:
+            dots += "▒"
+        else:
+            dots += "░"
+    return dots
+
+def score_color(score):
+    if score >= 0.8: return C_SCORE_CR
+    if score >= 0.6: return C_SCORE_HI
+    if score >= 0.4: return C_SCORE_MED
+    return C_SCORE_OK
+
+def threat_label(score):
+    if score >= 0.8: return "ALERT"
+    if score >= 0.6: return "SUSPICIOUS"
+    if score >= 0.4: return "WATCH"
+    return "SAFE"
+
+def threat_bar(score, width=20):
+    filled = int(score * width)
+    empty = width - filled
+    color = score_color(score)
+    return c(color, "█" * filled) + c(C_DGRAY, "░" * empty) + f" {score:.2f}"
+
+BANNER = rf"""
+{c(C_TEAL, '  ┌──────────────────────────────────────────────────────┐')}
+{c(C_TEAL, '  │')}{c(C_GREEN + C_BOLD, '  ◉  NOMAD  ')}{c(C_DGRAY, '─')} {c(C_LGRAY, 'AUTONOMOUS AGENT DRIFT DETECTOR')}  {c(C_TEAL, '│')}
+{c(C_TEAL, '  │')}{c(C_DGRAY, '     scanning your machine for things that move        ')}{c(C_TEAL, '│')}
+{c(C_TEAL, '  └──────────────────────────────────────────────────────┘')}"""
+
 
 def cmd_scan(args):
     if args.block:
-        print("\n  ⚠  BLOCK MODE: High-confidence drifters will be killed.")
-        print("  ⚠  Use at your own risk. See LICENSE for terms.\n")
+        print(c(C_RED + C_BOLD, "\n  ⚠  BLOCK MODE ENGAGED — high-confidence drifters will be terminated."))
+        print(c(C_DGRAY, "  ⚠  Use at your own risk. See LICENSE.\n"))
 
     engine = NomadEngine(dry_run=not args.block)
     result = engine.run_once()
@@ -26,66 +95,117 @@ def cmd_scan(args):
         return
 
     ts = datetime.fromtimestamp(result["timestamp"], tz=timezone.utc).strftime("%H:%M:%S")
-    print(f"\n  nomad scan — {ts}")
-    print(f"  {'─' * 50}")
-    print(f"  Containers: {result['containers']}")
-    print(f"  Services:   {result['services']}")
-    print(f"  Processes:  {result['processes']}")
+
+    # Banner
+    print(BANNER)
     print()
 
-    if result["new_containers"]:
-        print(f"  🟢 New containers: {', '.join(result['new_containers'])}")
-    if result["gone_containers"]:
-        print(f"  🔴 Gone containers: {', '.join(result['gone_containers'])}")
-    if result["new_services"]:
-        print(f"  🟢 New services: {', '.join(result['new_services'])}")
-    if result["gone_services"]:
-        print(f"  🔴 Gone services: {', '.join(result['gone_services'])}")
-    if result["new_processes"]:
-        print(f"  🟢 New processes: {result['new_processes']}")
-    if result["gone_processes"]:
-        print(f"  🔴 Gone processes: {result['gone_processes']}")
-
+    # Timestamp + sweep
+    print(f"  {c(C_DGRAY, 'SCAN')}  {c(C_GREEN + C_BOLD, ts)}  {c(C_DGRAY, 'UTC')}")
     print()
+
+    # System layer counts
+    containers = result["containers"]
+    services = result["services"]
+    processes = result["processes"]
+
+    print(f"  {c(C_TEAL, '◆ LAYERS SCANNED')}")
+    print(f"    {c(C_GREEN, '●')} Containers   {c(C_GREEN + C_BOLD, str(containers).rjust(4))}")
+    print(f"    {c(C_GREEN, '●')} Services     {c(C_GREEN + C_BOLD, str(services).rjust(4))}")
+    print(f"    {c(C_GREEN, '●')} Processes    {c(C_GREEN + C_BOLD, str(processes).rjust(4))}")
+    print()
+
+    # Changes — radar style
+    has_changes = any([
+        result["new_containers"], result["gone_containers"],
+        result["new_services"], result["gone_services"],
+        result["new_processes"], result["gone_processes"]
+    ])
+
+    if has_changes:
+        print(f"  {c(C_TEAL, '◆ RADAR CONTACTS')}")
+        if result["new_containers"]:
+            print(f"    {c(C_GREEN, '►')} New containers  {c(C_GREEN + C_BOLD, ', '.join(result['new_containers']))}")
+        if result["gone_containers"]:
+            print(f"    {c(C_RED, '◄')} Gone containers {c(C_RED + C_BOLD, ', '.join(result['gone_containers']))}")
+        if result["new_services"]:
+            print(f"    {c(C_GREEN, '►')} New services    {c(C_GREEN + C_BOLD, str(result['new_services']))}")
+        if result["gone_services"]:
+            print(f"    {c(C_RED, '◄')} Gone services   {c(C_RED + C_BOLD, str(result['gone_services']))}")
+        if result["new_processes"]:
+            print(f"    {c(C_GREEN, '►')} Spawned         {c(C_GREEN + C_BOLD, str(result['new_processes']) + ' processes')}")
+        if result["gone_processes"]:
+            print(f"    {c(C_RED, '◄')} Vanished        {c(C_RED + C_BOLD, str(result['gone_processes']) + ' processes')}")
+        print()
+
+    # Migrations
     if result["migrations"]:
-        print(f"  🔄 MIGRATIONS: {len(result['migrations'])}")
+        print(f"  {c(C_YELLOW, '◆ MIGRATIONS DETECTED')}")
         for m in result["migrations"]:
-            print(f"    {m['source']} → {m['target']}  ({m['kind']}, sim={m['similarity']:.2f})")
+            sim = m["similarity"]
+            sc = score_color(sim)
+            bar = threat_bar(sim, 15)
+            print(f"    {c(C_AMBER, '↻')} {c(C_LGRAY, m['source'])} → {c(C_LGRAY, m['target'])}  {c(C_DGRAY, '(' + m['kind'] + ')')}")
+            print(f"      similarity {bar}  {c(sc, threat_label(sim))}")
         print()
 
+    # Credential access
     if result.get("credential_findings"):
-        print(f"  🔐 CREDENTIAL ACCESS: {len(result['credential_findings'])}")
-        for c in result["credential_findings"]:
-            emoji = "🔴" if c["risk_level"] == "critical" else "🟠" if c["risk_level"] == "high" else "🟡"
-            print(f"    {emoji} {c['process_name']} (PID {c['pid']}) → {c['file_path']} [{c['risk_level']}]")
+        print(f"  {c(C_RED + C_BLINK, '◆ CREDENTIAL ACCESS DETECTED')}")
+        for cr in result["credential_findings"]:
+            level = cr["risk_level"]
+            color = C_RED if level == "critical" else C_ORANGE if level == "high" else C_YELLOW
+            print(f"    {c(color, '●')} {c(C_LGRAY, cr['process_name'])} {c(C_DGRAY, 'PID ' + str(cr['pid']))} → {c(color, cr['file_path'])}  {c(color + C_BOLD, level.upper())}")
         print()
 
+    # Network anomalies
     if result.get("network_anomalies"):
-        print(f"  🌐 NETWORK ANOMALIES: {len(result['network_anomalies'])}")
+        print(f"  {c(C_ORANGE, '◆ NETWORK ANOMALIES')}")
         for n in result["network_anomalies"]:
-            emoji = "🔴" if n["risk_level"] == "critical" else "🟠" if n["risk_level"] == "high" else "🟡"
+            level = n["risk_level"]
+            color = C_RED if level == "critical" else C_ORANGE if level == "high" else C_YELLOW
             remote = n["remote_addr"] or "N/A"
-            print(f"    {emoji} {n['process_name']} (PID {n['pid']}) — {n['anomaly_type']} → {remote} [{n['risk_level']}]")
+            print(f"    {c(color, '●')} {c(C_LGRAY, n['process_name'])} {c(C_DGRAY, 'PID ' + str(n['pid']))} — {c(color, n['anomaly_type'])} → {c(C_LGRAY, remote)}  {c(color + C_BOLD, level.upper())}")
         print()
 
+    # Disk
     disk = result.get("disk", {})
     if disk:
-        icon = "🔴" if disk["level"] == "crit" else "🟡" if disk["level"] == "warn" else "✅"
-        print(f"  {icon} Disk: {disk['free_gb']}G free / {disk['total_gb']}G ({disk['pct']}%) — {disk['level']}")
+        level = disk["level"]
+        color = C_RED if level == "crit" else C_YELLOW if level == "warn" else C_GREEN
+        pct = disk["pct"]
+        bar_w = 30
+        filled = int(pct / 100 * bar_w)
+        bar = c(color, "█" * filled) + c(C_DGRAY, "░" * (bar_w - filled))
+        print(f"  {c(C_TEAL, '◆ DISK')}  {bar}  {c(color, str(pct) + '%')}  {c(C_LGRAY, str(disk['free_gb']) + 'G free / ' + str(disk['total_gb']) + 'G')}")
         print()
 
-    mode = "BLOCKING" if args.block else "monitoring (dry-run)"
-    print(f"  Mode: {mode}")
+    # Threat summary
+    total_threats = len(result.get("credential_findings", [])) + len(result.get("network_anomalies", []))
+    migrations = len(result["migrations"])
+    if total_threats > 0:
+        print(f"  {c(C_RED + C_BOLD, '⚠ ' + str(total_threats) + ' THREAT(S) DETECTED')}  {c(C_DGRAY, 'Run')} {c(C_TEAL, 'nomad scan --block')} {c(C_DGRAY, 'to terminate')}")
+        print()
+    elif migrations > 0:
+        print(f"  {c(C_YELLOW, '● ' + str(migrations) + ' migration(s) tracked')}  {c(C_DGRAY, 'monitoring for escalation')}")
+        print()
+
+    # Mode footer
+    mode = c(C_RED + C_BOLD, "BLOCKING") if args.block else c(C_DGRAY, "monitoring (dry-run)")
+    print(f"  {c(C_DGRAY, 'mode')} {mode}")
 
 
 def cmd_watch(args):
     if args.block:
-        print("\n  ⚠  BLOCK MODE: High-confidence drifters will be killed.")
-        print("  ⚠  Use at your own risk. See LICENSE for terms.\n")
+        print(c(C_RED + C_BOLD, "\n  ⚠  BLOCK MODE ENGAGED — high-confidence drifters will be terminated."))
+        print(c(C_DGRAY, "  ⚠  Use at your own risk. See LICENSE.\n"))
 
     engine = NomadEngine(dry_run=not args.block)
-    print(f"\n  nomad watch — scanning every {args.interval}s (Ctrl+C to stop)")
-    print(f"  Self-heal: scan >4s for 2+ scans → skip connections, >8s or 5+ slow → throttle, >15s or 10+ slow → critical\n")
+    print(BANNER)
+    print()
+    print(f"  {c(C_TEAL, '◆ MONITORING')}  scanning every {c(C_GREEN + C_BOLD, str(args.interval) + 's')}  {c(C_DGRAY, '(Ctrl+C to stop)')}")
+    print(f"  {c(C_DGRAY, 'self-heal: slow scans → throttle → backoff → recovery')}")
+    print()
     engine.run_loop(interval=args.interval)
 
 
@@ -93,14 +213,18 @@ def cmd_alerts(args):
     engine = NomadEngine()
     alerts = engine.get_alerts(limit=args.limit)
     if not alerts:
-        print("  No alerts recorded.")
+        print(f"  {c(C_GREEN, '✓')} No alerts recorded. All clear.")
         return
+    print(f"\n  {c(C_RED, '◆ ALERT HISTORY')}  ({len(alerts)} entries)")
+    print()
     for a in alerts[-args.limit:]:
         ts = a.get("timestamp", "?")
         kind = a.get("type", "unknown")
         name = a.get("name", "")
         score = a.get("score", "")
-        print(f"  [{ts}] {kind} — {name} (score={score})")
+        sc = score_color(float(score)) if score else C_DGRAY
+        print(f"    {c(C_DGRAY, ts)}  {c(sc, kind)}  {c(C_LGRAY, name)}  {c(sc, 'score=' + str(score))}")
+    print()
 
 
 def cmd_fingerprint(args):
@@ -115,17 +239,20 @@ def cmd_fingerprint(args):
         return
 
     if not drifters:
-        print("  No drifters found in current scan.")
+        print(f"  {c(C_GREEN, '✓')} No drifters found. System clean.")
         return
 
-    print(f"\n  Drifters found: {len(drifters)}")
-    for d in drifters:
-        emoji = "🔴" if d.score > 0.8 else "🟡"
-        print(f"  {emoji} [{d.kind}] {d.name} — score={d.score:.2f}")
-        print(f"     reason: {d.reason}")
-        for ev in d.evidence:
-            print(f"     evidence: {ev}")
+    print(f"\n  {c(C_RED, '◆ DRIFTERS FOUND')}: {c(C_RED + C_BOLD, str(len(drifters)))}")
     print()
+    for d in drifters:
+        sc = score_color(d.score)
+        bar = threat_bar(d.score, 15)
+        print(f"    {c(sc, '●')} [{c(C_LGRAY, d.kind)}] {c(C_LGRAY, d.name)}")
+        print(f"      {bar}  {c(sc + C_BOLD, threat_label(d.score))}")
+        print(f"      {c(C_DGRAY, 'reason:')} {c(C_LGRAY, d.reason)}")
+        for ev in d.evidence:
+            print(f"      {c(C_DGRAY, 'evidence:')} {c(C_LGRAY, ev)}")
+        print()
 
 
 def cmd_state(args):
@@ -173,22 +300,28 @@ def cmd_security(args):
         print(json.dumps(result, indent=2))
         return
 
-    print(f"\n  nomad security check")
+    print(f"\n  {c(C_TEAL, '◆ SECURITY POSTURE')}")
     print(f"  {'─' * 50}")
     if not result.get("available"):
-        print(f"  ❌ {result.get('error', 'sec-toolkit.sh not found')}")
+        print(f"  {c(C_RED, '✗')} {result.get('error', 'sec-toolkit.sh not found')}")
         return
 
     sections = result.get("sections", {})
     score = result.get("score", 0)
 
-    print(f"  Posture score: {score}/100\n")
+    color = C_GREEN if score >= 80 else C_YELLOW if score >= 50 else C_RED
+    bar_w = 30
+    filled = int(score / 100 * bar_w)
+    bar = c(color, "█" * filled) + c(C_DGRAY, "░" * (bar_w - filled))
+
+    print(f"\n  {bar}  {c(color + C_BOLD, str(score) + '/100')}\n")
+
     for name, content in sections.items():
         preview = content[:200].replace("\n", "\n    ")
-        print(f"  [{name}]")
-        print(f"    {preview}")
+        print(f"  {c(C_TEAL, '[' + name + ']')}")
+        print(f"    {c(C_LGRAY, preview)}")
         if len(content) > 200:
-            print(f"    ... ({len(content)} chars total)")
+            print(f"    {c(C_DGRAY, '... (' + str(len(content)) + ' chars total)')}")
         print()
 
 
