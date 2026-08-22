@@ -4,7 +4,7 @@
 # Installs deps, creates .env, optionally sets up systemd service
 #
 # Usage:
-#   curl -fsSL https://raw.githubusercontent.com/008Amonra/loom/main/nomad/install.sh | bash
+#   curl -fsSL https://raw.githubusercontent.com/008Amonra/nomad/main/install.sh | bash
 #   ./install.sh --upgrade
 #
 
@@ -15,8 +15,8 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 if [[ "$SCRIPT_DIR" == /dev/fd* ]]; then
     SCRIPT_DIR="$(pwd)"
 fi
-REPO_URL="https://github.com/008Amonra/loom.git"
-NOMAD_PATH="nomad"
+REPO_URL="https://github.com/008Amonra/nomad.git"
+NOMAD_PATH="."
 UPGRADE_MODE=false
 
 RED='\033[0;31m'
@@ -63,7 +63,7 @@ if [ ! -f "$SCRIPT_DIR/cli.py" ]; then
     echo -e "  ${YELLOW}Downloading from GitHub...${NC}"
     rm -rf /tmp/nomad-repo
     git clone --depth 1 "$REPO_URL" /tmp/nomad-repo 2>/dev/null
-    cp -r /tmp/nomad-repo/$NOMAD_PATH/* "$SCRIPT_DIR/"
+    cp -r /tmp/nomad-repo/.gitignore /tmp/nomad-repo/* "$SCRIPT_DIR/" 2>/dev/null || cp -r /tmp/nomad-repo/* "$SCRIPT_DIR/"
     rm -rf /tmp/nomad-repo
     echo -e "  ${GREEN}✓${NC} Downloaded nomad $(cat "$SCRIPT_DIR/VERSION" 2>/dev/null || echo 'latest')"
 fi
